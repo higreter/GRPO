@@ -1,0 +1,97 @@
+# Method 4: JwC (arXiv:2510.00263) -- GRPO with an RL-Brier reward.
+#
+# The model states a probability instead of choosing a letter:
+#   <think>...</think><prob_rb_better>0.85</prob_rb_better>   with p = Pr[B is better]
+# and the reward is the Brier score of that probability against the label (paper Eq. 1):
+#   R = 1 - (p - y)^2,  y = 1 if B better else 0
+# An unparsable probability scores 0 -- the paper's own unparsable branch -- so refusing to
+# answer is never better than answering badly.
+#
+# Sparse-label adaptation (important)
+# ----------------------------------
+# The paper trains on *dense* preference distributions: ten annotators per prompt, so the
+# target y is a rate in [0, 1].  HelpSteer3 gives one label per pair, so y here is 0 or 1.
+# This is the sparse-label instance of the same proper scoring rule, not the paper's
+# setting, and the report says so where the numbers are compared.
+#
+# Budget arithmetic (validated):
+#   rows_per_update      = 8 * 1 = 8
+#   rollouts_per_state   = 8 / 1 = 8
+#   rollouts_per_update  = 8 * 8 = 64
+#   training_steps       = 16384 / 64 = 256
+#   total_rollouts       = 16384
+#   generated tokens     = 46,268,416   (identical to all three other methods)
+#
+# measured prompt lengths (real tokenizer, this template, all 22,190 rows):
+# min 265 / p50 1404 / p90 3267 / p95 3857 / p99 4883 / max 10590.
+
+method: jwc
+output_format: jwc
+base_model: /data/common_data/Qwen/Qwen2.5-3B-Instruct
+train_dataset: ../database/helpsteer3_train_clean.jsonl
+output_dir: runs/jwc
+
+seed: 42
+max_prompt_length: 11264
+max_completion_length: 1024
+
+learning_rate: 1.0e-6
+lr_scheduler_type: constant
+warmup_ratio: 0.0
+
+global_batch_size: 8
+micro_batch_size: 2
+gradient_accumulation: 4
+states_per_sample: 1
+num_generations: 8
+training_steps: 256
+total_rollouts: 16384
+estimated_prompt_tokens: 1800
+estimated_generated_tokens: 46268416
+
+temperature: 1.0
+top_p: 1.0
+clip_epsilon: 0.2
+
+reference_model_policy: frozen_initial_policy
+kl_beta: 0.01
+
+logging:
+  log_every_n_steps: 10
+  save_completion_samples: true
+  metrics:
+    - reward/mean
+    - reward/std
+    - probability/mean
+    - brier/train
+    - invalid_rate
+    - decision_accuracy
+    - advantages/std
+    - kl
+
+checkpoint:
+  save_every_n_steps: 128
+  save_total_limit: 2
+  save_optimizer_state: false
+
+controlled_budget:
+  paper_reference: >-
+    JwC's RL stage uses beta=0.01, clip 0.2, 32-64 prompts per step, 32 generations per
+    prompt, LR 3e-7 with 1% linear warmup over 50 steps, batch 512, one epoch, max total
+    sequence length 2048. Reward is the Brier score of a verbalised probability.
+  controlled_reference: >-
+    Matched to the other three on rows_per_update (8), rollouts per update (64), total
+    rollouts (16,384) and estimated generated tokens (46,268,416). LR is 1e-6 and the
+    sequence budget 11264+1024 rather than the paper's 2048 total, both for consistency
+    with the other three methods in this comparison.
+  paper_states_per_sample: 1
+  paper_rollouts_per_state: 32
+  paper_rollouts_per_update: 512
+  paper_training_steps: 1000
+  paper_generated_tokens: 1445888000
+  notes: >-
+    Two deviations. (1) Sparse labels: the paper's dense ten-annotator targets are not
+    available in HelpSteer3, so y in {0,1}. (2) The paper's 2048-token total sequence
+    budget would truncate most HelpSteer prompts (p90 is 3267 tokens), so this config keeps
+    the project-wide 11264+1024. paper_* numbers are our scale estimates from total batch
+    512, not published values.

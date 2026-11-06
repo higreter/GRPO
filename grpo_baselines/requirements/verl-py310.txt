@@ -1,0 +1,79 @@
+# =====================================================================================
+# grpo-verl-py310 -- pinned reference environment for the verl backend of J4R / EIS
+#
+#   *** THIS FILE IS AN INSTRUCTION SHEET, NOT AN EXECUTED INSTALL. ***
+#
+# No package was installed, upgraded or removed while these baselines were written, and
+# no verl job was launched.  `trainers/j4r/verl_adv.py` only *registers* an advantage
+# estimator; it was never imported in an environment where verl exists.
+#
+# Why a separate file from trl-py311.txt: the two stacks disagree about torch.
+#   external/verl/pyproject.toml  -> requires-python = ">=3.10,<3.13"
+#   external/verl/pyproject.toml  -> "torch==2.9.1"  (verl-core), "torch==2.13.0" (vllm)
+#   external/trl/pyproject.toml   -> requires-python = ">=3.11", torch>=2.6.0
+# Installing both sets of pins into one environment resolves to whichever was installed
+# last; that is the concrete ABI risk this note is about.  Use three environments:
+#   (a) grpo-trl-py311   -- CPU tests + TRL training
+#   (b) grpo-verl-py310  -- verl rollout/training
+#   (c) judge eval env   -- RewardBench inference only (transformers, no trainer)
+#
+# Pinned upstream:  verl 745432653d15af14954af1e055c8aeed72afa064 (version file: 0.10.0.dev)
+#
+# -------------------------------------------------------------------------------------
+# Suggested (UNEXECUTED) procedure
+# -------------------------------------------------------------------------------------
+#   conda create -n grpo-verl-py310 python=3.10 -y
+#   conda activate grpo-verl-py310
+#   pip install -r requirements/verl-py310.txt
+#   pip install "verl @ git+https://github.com/volcengine/verl.git@745432653d15af14954af1e055c8aeed72afa064"
+#
+# -------------------------------------------------------------------------------------
+# Pins
+# -------------------------------------------------------------------------------------
+# --- interpreter ---------------------------------------------------------------------
+# python >=3.10,<3.13             (verl/pyproject.toml, verbatim)
+
+# --- deep-learning core (verl's own pins) --------------------------------------------
+# verl's verl-core extra pins torch==2.9.1; its vllm extra separately pins torch==2.13.0
+# because vllm 0.32.0 ships a cu130 / torch-2.13 build.  Those two cannot coexist, which
+# is why the vllm path needs its own environment.
+torch==2.9.1                       # verl-core
+# torch==2.13.0 + torchvision==0.28.0 + torchaudio==2.11.0   # only with the vllm backend
+
+# --- verl runtime dependencies (verl/setup.py install_requires, verbatim) ------------
+accelerate
+codetiming
+datasets
+dill
+hydra-core
+numpy>=2.0.0
+pandas
+peft
+pyarrow>=19.0.0
+pybind11
+pylatexenc
+ray[default]>=2.41.0
+torchdata
+tensordict>=0.8.0,<=0.10.0,!=0.9.0
+# transformers>=5.5.3 is what verl asks for; note this contradicts TRL's >=4.56.2 floor in
+# spirit (5.x renamed kernels/hub-kernels).  Keep the two environments separate.
+
+# --- rollout backend (pick exactly one) ----------------------------------------------
+# A. vLLM (what J4R's paper uses for generation)
+# vllm==0.32.0                     # needs torch 2.13 / cu130, see above
+# B. SGLang
+# sglang[srt,openai]==0.5.8        # also pins torch==2.9.1
+# C. HuggingFace generate (slowest, no extra wheel, useful for a one-step smoke test)
+#    -- nothing to install beyond transformers
+
+# --- kernel / attention (optional, CUDA-ABI sensitive) -------------------------------
+# flash-attn is built against the exact torch + CUDA toolchain present at compile time.
+# Installing a prebuilt wheel that mismatches either one produces either an import error
+# or, worse, a wrong-result kernel.  Build it after torch is frozen:
+#   pip install flash-attn --no-build-isolation
+# liger-kernel==0.8.4              # verl[gpu]
+
+# --- test runner ---------------------------------------------------------------------
+# Not needed for this repository: the CPU suite is standard-library unittest.  verl's own
+# tests want pytest:
+# pytest

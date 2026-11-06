@@ -1,0 +1,44 @@
+# Explicitly excluded from the GitHub repository by user request.
+/papers/
+/models/
+
+# Local environments, credentials and machine-specific state.
+/.venv/
+/envs/
+.env
+.env.*
+*.pem
+*.key
+
+# Python/editor caches.
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.idea/
+.vscode/
+
+# Generated transfer archives are not source artifacts.
+/GRPO_MIGRATION_*.tar
+/GRPO_MIGRATION_*.tar.gz
+/GRPO_MIGRATION_*.tar.zst
+/GRPO_MIGRATION_*.sha256
+
+# Future model/optimizer artifacts must not enter ordinary Git history.
+**/checkpoint-*/
+**/final/*.safetensors
+**/final/pytorch_model*.bin
+**/optimizer.pt
+**/scheduler.pt
+**/rng_state*.pth
+*.safetensors
+
+# Local orchestration state; small committed audit fixtures already present under runs/
+# remain visible unless they match one of the large-artifact rules above.
+*.pid
+*.lock
+
+# One-off local maintenance scripts and logs.
+grpo_baselines/runs/development/
+grpo_baselines/runs/*.log

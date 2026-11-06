@@ -1,0 +1,12 @@
+[submodule "external/trl"]
+	path = external/trl
+	url = https://github.com/huggingface/trl.git
+[submodule "external/verl"]
+	path = external/verl
+	url = https://github.com/volcengine/verl.git
+[submodule "external/reasoning-judge-bench"]
+	path = external/reasoning-judge-bench
+	url = https://github.com/SalesforceAIResearch/ReasoningJudgeBench.git
+[submodule "external/deepseek-math"]
+	path = external/deepseek-math
+	url = https://github.com/deepseek-ai/DeepSeek-Math.git

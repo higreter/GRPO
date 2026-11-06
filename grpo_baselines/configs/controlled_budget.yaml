@@ -1,0 +1,203 @@
+# Controlled-comparison budget table.
+#
+# This file is *documentation with numbers*, not a trainer config: common.config skips it
+# when loading configs/*.yaml, and tests/test_configs.py checks that every figure here
+# still matches the four method configs.  If someone edits a method config without updating
+# this table, the test fails -- that is the point of duplicating the numbers.
+#
+# Why the comparison is matched on rollouts and tokens rather than on steps
+# -----------------------------------------------------------------------
+# One J1 or J4R "sample" costs two prompt states (the original and the swapped view), and
+# one update therefore draws 2x the rows of a vanilla update at the same G.  Equal step
+# counts would give the paired methods twice the generated tokens and twice the gradient
+# signal, so "same steps" would silently be an unfair advantage.  The four configs are
+# instead matched on:
+#
+#   * total rollouts           16,384
+#   * estimated generated tokens  46,268,416  (= total_rollouts * (1800 + 1024))
+#
+# and the step counts differ (256 vs 128) precisely to make that true.
+
+controlled:
+  total_rollouts: 16384
+  estimated_prompt_tokens: 1800
+  max_completion_length: 1024
+  estimated_generated_tokens: 46268416
+  max_prompt_length: 11264
+  context_budget: 12288
+  context_limit: 32768
+  seed: 42
+  base_model: /data/common_data/Qwen/Qwen2.5-3B-Instruct
+  train_dataset: ../database/helpsteer3_train_clean.jsonl
+  learning_rate: 1.0e-6
+  lr_scheduler_type: constant
+  warmup_ratio: 0.0
+  temperature: 1.0
+  top_p: 1.0
+  clip_epsilon: 0.2
+  kl_beta: 0.01
+  reference_model_policy: frozen_initial_policy
+  global_batch_size: 8
+  micro_batch_size: 2
+
+# One row per method.  Each row answers all eight questions Sec. 9 asks: the paper's
+# configuration (per-config `controlled_budget.paper_*`), this project's controlled
+# configuration (`rollouts_per_update`, `training_steps`), states per sample, rollouts per
+# state, total rollouts per update, pre-registered steps, estimated generated tokens, and
+# whether a frozen reference with KL is used.
+#
+# `estimated_generated_tokens` is arithmetic: total_rollouts * (estimated_prompt_tokens +
+# max_completion_length), recomputed by common/config.py.  `actual_generated_tokens` is null
+# in every row because nothing was trained -- a measured token count cannot exist.  Writing
+# null is deliberate: an absent key would read as "not filled in", while null plus a reason
+# states the same fact as the status table.  "states" is per source preference pair; "G per state" is what TRL
+# normalises over (num_generations // states), and is what the EIS local term uses too.
+methods:
+  vanilla:
+    states_per_sample: 1
+    num_generations: 8
+    rollouts_per_state: 8
+    rows_per_update: 8
+    rollouts_per_update: 64
+    gradient_accumulation: 4
+    training_steps: 256
+    estimated_generated_tokens: 46268416
+    actual_generated_tokens: null  # no training run was performed; see open_risks
+    reference_model_policy: frozen_initial_policy
+    kl_beta: 0.01
+    frozen_reference_with_kl: true
+    reward: verdict correctness (1/0)
+    advantage: GRPO group normalisation (TRL scale_rewards=group)
+    reward_functions: 1
+  j1:
+    states_per_sample: 2
+    num_generations: 16
+    rollouts_per_state: 8
+    rows_per_update: 16
+    rollouts_per_update: 128
+    gradient_accumulation: 8
+    training_steps: 128
+    estimated_generated_tokens: 46268416
+    actual_generated_tokens: null  # no training run was performed; see open_risks
+    reference_model_policy: frozen_initial_policy
+    kl_beta: 0.01
+    frozen_reference_with_kl: true
+    reward: verdict correctness (+1) and pair consistency (+1 only if both orders correct)
+    advantage: GRPO group normalisation, groups are per state
+    reward_functions: 1
+  j4r:
+    states_per_sample: 2
+    num_generations: 16
+    rollouts_per_state: 8
+    rows_per_update: 16
+    rollouts_per_update: 128
+    gradient_accumulation: 8
+    training_steps: 128
+    estimated_generated_tokens: 46268416
+    actual_generated_tokens: null  # no training run was performed; see open_risks
+    reference_model_policy: frozen_initial_policy
+    kl_beta: 0.01
+    frozen_reference_with_kl: true
+    reward: judgement correctness (1/0) + format (+0.5 / -0.5)
+    advantage: EIS -- global term across both states plus local term within the state
+    reward_functions: 1
+  jwc:
+    states_per_sample: 1
+    num_generations: 8
+    rollouts_per_state: 8
+    rows_per_update: 8
+    rollouts_per_update: 64
+    gradient_accumulation: 4
+    training_steps: 256
+    estimated_generated_tokens: 46268416
+    actual_generated_tokens: null  # no training run was performed; see open_risks
+    reference_model_policy: frozen_initial_policy
+    kl_beta: 0.01
+    frozen_reference_with_kl: true
+    reward: 1 - (p - y)^2 over a verbalised probability, 0 if unparsable
+    advantage: GRPO group normalisation (TRL scale_rewards=group)
+    reward_functions: 1
+
+# Paper-original vs controlled-comparison.  The right-hand column is what this repository
+# actually configures; the left-hand column is what each paper reports, quoted so a reader
+# can see every departure at once.  Where a paper does not state a value, the cell says so
+# rather than being filled with a guess.
+paper_vs_controlled:
+  - axis: base model
+    vanilla: DeepSeekMath-7B (paper)
+    j1: Llama-3.1-8B-Instruct / Qwen2.5-7B (paper reports 8B and 70B)
+    j4r: Qwen2.5-7B-Instruct (paper)
+    jwc: Gemma-2-9B / Qwen2.5-7B (paper)
+    controlled: Qwen2.5-3B-Instruct, fixed for all four
+    note: A 3B control model keeps four runs inside one budget; cross-paper absolute scores are therefore not comparable.
+  - axis: training data
+    vanilla: GSM8K + MATH (reasoning prompts)
+    j1: 17K WildChat + 5K MATH
+    j4r: HelpSteer3 preference pairs, reformatted
+    jwc: dense 10-annotator preference distributions
+    controlled: HelpSteer3 train split (22,190 pairs), one hard label per pair
+    note: JwC's dense targets are unavailable here; see the sparse-label note in configs/jwc_rl_brier.yaml.
+  - axis: rollouts per prompt (G)
+    vanilla: 64
+    j1: 5
+    j4r: 32 (16 per state)
+    jwc: 32
+    controlled: 8 per state (16 per pair for the paired methods)
+    note: Reduced so that 16,384 total rollouts and 46.3M generated tokens are reachable; EIS needs only G>=2 per state.
+  - axis: optimizer steps
+    vanilla: not stated
+    j1: not stated
+    j4r: not stated
+    jwc: 1 epoch (~not stated as steps)
+    controlled: 256 (single-state) / 128 (paired)
+    note: Steps differ between methods by design -- see the note at the top of this file.
+  - axis: KL coefficient
+    vanilla: 0.04 (paper's setting for the 7B model)
+    j1: 0.01 for 8B, 0 for 70B
+    j4r: 1e-4
+    jwc: 0.01
+    controlled: 0.01 for all four
+    note: Held constant so a KL difference cannot masquerade as a method effect; the paper values are recorded per method in each config's controlled_budget block.
+  - axis: learning rate
+    vanilla: 1e-6
+    j1: 1e-6 (70B decays to 3e-7)
+    j4r: 1e-6
+    jwc: 3e-7
+    controlled: 1e-6, constant schedule, no warmup
+    note: JwC's 3e-7 is its own tuned value; using it here would confound the comparison.
+  - axis: sequence budget
+    vanilla: not stated (long-CoT)
+    j1: 4096 total (input+output)
+    j4r: not stated
+    jwc: 2048 total
+    controlled: 11264 prompt + 1024 completion = 12288
+    note: HelpSteer prompts have p90 3267 tokens (real Qwen tokenizer); a 2048 total budget would truncate most of the data, which the length audit refuses to do silently.
+  - axis: reward
+    vanilla: outcome correctness
+    j1: verdict correctness + consistency (both orders)
+    j4r: judgement + format
+    jwc: Brier score of verbalised probability
+    controlled: each method's own reward, implemented in rewards/ and trainers/j4r/reward.py
+    note: The reward is the treatment, so it is not matched; only the budget and optimiser are.
+  - axis: advantage
+    vanilla: group normalisation
+    j1: group normalisation
+    j4r: EIS (global + local)
+    jwc: group normalisation
+    controlled: as specified per method
+    note: J4R is the only method whose estimator differs; trainers/j4r/advantage.py replaces TRL's rather than relabelling it.
+  - axis: evaluation
+    vanilla: RewardBench / JudgeBench accuracy
+    j1: RewardBench accuracy
+    j4r: JudgeBench, RewardBench
+    jwc: RewardBench accuracy + Brier/ECE
+    controlled: RewardBench v1 OOD (2,985 pairs, 23 subsets), original + swapped views, never trained on
+    note: Same test file for all four; calibration metrics are reported for JwC only, because the others emit hard verdicts.
+
+# Unresolved comparability risks, listed so they are not discovered later.
+open_risks:
+  - The 3B control model is smaller than every paper's; absolute numbers will be lower across the board and only relative differences are meaningful.
+  - JwC's sparse-label adaptation changes the target distribution, so its Brier score is not comparable to the paper's dense-target numbers.
+  - Only 16 rollouts per pair (8 per state) means a non-trivial fraction of J4R groups will have zero reward variance; EIS returns 0 advantage there (documented in trainers/j4r/eis.py), which weakens but does not bias the signal.
+  - J1's consistency term is computed inside a generation batch, so its estimate is over the batch's pairs, not the whole dataset.
+  - No GPU smoke test was run in this task: none of these numbers has been produced by an actual training run.

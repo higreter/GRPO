@@ -1,0 +1,11 @@
+# The clean/raw datasets exceed or approach GitHub's ordinary per-file limit.
+# `git lfs install` must be run before the first `git add`.
+/database/*.jsonl filter=lfs diff=lfs merge=lfs -text
+/database/*.jsonl.gz filter=lfs diff=lfs merge=lfs -text
+
+# Keep scripts and documentation text-normalised.
+*.py text eol=lf
+*.sh text eol=lf
+*.md text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf

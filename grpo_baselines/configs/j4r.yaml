@@ -1,0 +1,99 @@
+# Method 3: J4R (arXiv:2505.13346) -- EIS advantage + judgement/format reward.
+#
+# Two equivalent states per preference pair (same construction as J1), G rollouts split
+# evenly, and an advantage that is the *sum* of a global term (normalised across both
+# states) and a local term (normalised within the state), paper Eq. 4:
+#
+#   A^(i,l) = (R^(i,l) - mean_all) / std_all  +  (R^(i,l) - mean_l) / std_l
+#
+# The global term alone is not enough (paper Appendix D.1: JudgeBench 56.86 -> 49.14), and
+# neither is the local term alone -- that second case is ordinary GRPO shifted to
+# per-state groups, which is exactly what TRL would do if left unchanged.  Hence
+# trainers/j4r/advantage.py, which replaces TRL's advantages rather than re-labelling them.
+#
+# Budget arithmetic (validated):
+#   rows_per_update      = 8 * 2 = 16
+#   rollouts_per_state   = 16 / 2 = 8     (paper uses 16 per state with G=32; halved here
+#                                          to keep the token budget equal to the others)
+#   rollouts_per_update  = 8 * 16 = 128
+#   training_steps       = 128            (same as J1: same states, same G, same budget)
+#   total_rollouts       = 16384
+#   generated tokens     = 46,268,416     (identical to all three other methods)
+#
+# measured prompt lengths (real tokenizer, this template, both states, 44,380 rows):
+# min 286 / p50 1425 / p90 3287 / p95 3878 / p99 4904 / max 10611.
+
+method: j4r
+output_format: j4r
+base_model: /data/common_data/Qwen/Qwen2.5-3B-Instruct
+train_dataset: ../database/helpsteer3_train_clean.jsonl
+output_dir: runs/j4r
+
+seed: 42
+max_prompt_length: 11264
+max_completion_length: 1024
+
+learning_rate: 1.0e-6
+lr_scheduler_type: constant
+warmup_ratio: 0.0
+
+global_batch_size: 8
+micro_batch_size: 2
+gradient_accumulation: 8
+states_per_sample: 2
+num_generations: 16
+training_steps: 128
+total_rollouts: 16384
+estimated_prompt_tokens: 1800
+estimated_generated_tokens: 46268416
+
+temperature: 1.0
+top_p: 1.0
+clip_epsilon: 0.2
+
+reference_model_policy: frozen_initial_policy
+kl_beta: 0.01
+
+logging:
+  log_every_n_steps: 10
+  save_completion_samples: true
+  metrics:
+    - reward/mean
+    - reward/std
+    - reward/judgement_mean
+    - reward/format_ok_rate
+    - accuracy/parsed
+    - invalid_rate
+    - advantages/global_term_mean
+    - advantages/local_term_mean
+    - advantages/zero_variance_states
+    - kl
+
+checkpoint:
+  save_every_n_steps: 64
+  save_total_limit: 2
+  save_optimizer_state: false
+
+controlled_budget:
+  paper_reference: >-
+    J4R uses G=32 rollouts per question split as 16 per equivalent state, rollout batch
+    256, train batch 128, constant LR 1e-6, clip 0.2, KL beta 1e-4 on 8xH200. Reward is
+    R_j (correct verdict, 0/1) + R_f (format, +0.5 / -0.5).
+  controlled_reference: >-
+    Matched to the other three on rows_per_update (16 states), rollouts per update (128),
+    total rollouts (16,384) and estimated generated tokens (46,268,416). G is 16 (8 per
+    state) rather than the paper's 32, and KL beta is 1e-2 -- the controlled value shared
+    by all four methods, not the paper's 1e-4. See the note for both deviations.
+  paper_states_per_sample: 2
+  paper_rollouts_per_state: 16
+  paper_rollouts_per_update: 512
+  paper_training_steps: 1000
+  paper_generated_tokens: 1445888000
+  notes: >-
+    Two deviations from the paper, both recorded rather than hidden. (1) G=16 instead of
+    32 so the token budget matches the other three methods; EIS is defined for any G >= 2
+    per state and the paper's own footnote allows uneven splits. (2) kl_beta is 1e-2, the
+    controlled value shared by all four methods, whereas the paper trains J4R with 1e-4 --
+    a weaker KL lets a method drift further from the reference, so using the paper's value
+    here would have handed J4R a different constraint than its baselines. paper_* numbers
+    are our scale estimates from total batch 512, not published values.

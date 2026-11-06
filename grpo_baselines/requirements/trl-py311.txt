@@ -1,0 +1,70 @@
+# =====================================================================================
+# grpo-trl-py311 -- pinned reference environment for the TRL-based trainers
+#
+#   *** THIS FILE IS AN INSTRUCTION SHEET, NOT AN EXECUTED INSTALL. ***
+#
+# Nothing in this repository was installed, upgraded or removed while the baselines
+# were written.  The read-only environment that actually ran the CPU tests
+# (/data1/yanghao/miniconda3/envs/judgelrm-sft, Python 3.9.21, torch 2.8.0+cu128) has
+# *none* of these packages, and the four methods were never trained.  See the
+# environment and execution status sections of ../../docs/IMPLEMENTATION.md.
+#
+# Why a fresh environment: every trainer imports `trl`, and TRL at the pinned commit
+# requires Python >= 3.11 (external/trl/pyproject.toml: `requires-python = ">=3.11"`).
+# Python 3.9 cannot host it at all, so this file cannot be applied to judgelrm-sft.
+#
+# Versions were read off the pinned upstream sources, not guessed:
+#   external/trl/VERSION                -> 1.18.0.dev0
+#   external/trl/pyproject.toml         -> requires-python / dependencies
+# The two local checkouts are *not* pip installable as-is (they are `git clone`s used for
+# source reading); install from the same commits instead:
+#   TRL            3885117d6a1dd647d43befeddf0da482c505cb47
+#   transformers   >=4.56.2 (TRL's floor); the local read-only env has 4.57.6
+#
+# -------------------------------------------------------------------------------------
+# Suggested (UNEXECUTED) procedure
+# -------------------------------------------------------------------------------------
+#   conda create -n grpo-trl-py311 python=3.11 -y
+#   conda activate grpo-trl-py311
+#   pip install -r requirements/trl-py311.txt
+#   pip install "trl @ git+https://github.com/huggingface/trl.git@3885117d6a1dd647d43befeddf0da482c505cb47"
+#   python -m unittest discover -s tests -t . -v      # the CPU suite must pass first
+#
+# -------------------------------------------------------------------------------------
+# Pins
+# -------------------------------------------------------------------------------------
+# --- interpreter ---------------------------------------------------------------------
+# python == 3.11.*        (3.12/3.13 are also allowed upstream; 3.11 is the tested floor)
+
+# --- deep-learning core --------------------------------------------------------------
+# torch is deliberately NOT pinned to a patch version here.  The card on this machine is
+# an RTX 4090 (sm_89) and the driver ships CUDA 12.x, so a cu128 wheel is required; the
+# exact build has to match the driver at install time.  Pick it explicitly, e.g.
+#   pip install torch --index-url https://download.pytorch.org/whl/cu128
+# and then check `python -c "import torch; print(torch.version.cuda, torch.cuda.is_available())"`.
+# Observed in the read-only env that ran the CPU tests: torch 2.8.0+cu128.
+torch>=2.6.0                       # TRL floor (trl/pyproject.toml)
+transformers>=4.56.2               # TRL floor; 4.57.6 observed locally
+tokenizers>=0.22                   # must be ABI-compatible with the transformers build
+accelerate>=1.11.0                 # TRL floor (trl/pyproject.toml)
+safetensors>=0.4.3
+
+# --- TRL's own runtime dependencies (trl/pyproject.toml, verbatim floors) -------------
+datasets>=4.7.0
+huggingface_hub>=0.34.0
+numpy>=1.26.0
+packaging>20.0
+pandas>=2.1.1
+psutil>=5.9.4
+pyarrow>=21.0.0
+pyyaml>=6.0.1
+jinja2
+
+# --- optional, only if you actually train (comment out for a CPU-only box) -----------
+# deepspeed>=0.18.6                # trl[deepspeed]; not needed for single-GPU smoke test
+# wandb                            # logging; the shipped configs use report_to="none"
+
+# --- test runner ---------------------------------------------------------------------
+# The CPU suite was written for the standard library on purpose (the read-only env has no
+# pytest), so pytest is NOT required.  Install it only for nicer output:
+# pytest>=8.0

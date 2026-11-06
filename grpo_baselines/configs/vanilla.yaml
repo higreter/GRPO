@@ -1,0 +1,84 @@
+# Method 1: vanilla GRPO (TRL GRPOTrainer unchanged, verdict-correctness reward).
+#
+# This is the control condition.  Everything here is deliberately shared with the three
+# method configs (same model, seed, token budget, optimiser, KL, reference policy); the
+# only differences are the method-defining mechanics.
+#
+# Budget arithmetic (validated by common/config.py, so it cannot drift):
+#   rows_per_update      = global_batch_size * states_per_sample = 8 * 1 = 8
+#   rollouts_per_state   = num_generations / states_per_sample    = 8 / 1 = 8
+#   rollouts_per_update  = global_batch_size * num_generations    = 8 * 8 = 64
+#   total_rollouts       = training_steps * 64                    = 256 * 64 = 16384
+#   generated tokens     = total_rollouts * (1800 + 1024)         = 46,268,416
+#
+# measured prompt lengths (real Qwen2.5 tokenizer, this method's template, all 22,190
+# rows): min 191 / p50 1330 / p90 3192 / p95 3783 / p99 4809 / max 10516.
+# max_prompt_length=11264 therefore truncates nothing; see runs/length_audit.json.
+
+method: vanilla
+output_format: vanilla
+base_model: /data/common_data/Qwen/Qwen2.5-3B-Instruct
+train_dataset: ../database/helpsteer3_train_clean.jsonl
+output_dir: runs/vanilla
+
+seed: 42
+max_prompt_length: 11264
+max_completion_length: 1024
+
+learning_rate: 1.0e-6
+lr_scheduler_type: constant
+warmup_ratio: 0.0
+
+global_batch_size: 8
+micro_batch_size: 2
+gradient_accumulation: 4
+states_per_sample: 1
+num_generations: 8
+training_steps: 256
+total_rollouts: 16384
+estimated_prompt_tokens: 1800
+estimated_generated_tokens: 46268416
+
+temperature: 1.0
+top_p: 1.0
+clip_epsilon: 0.2
+
+reference_model_policy: frozen_initial_policy
+kl_beta: 0.01
+
+logging:
+  log_every_n_steps: 10
+  save_completion_samples: true
+  metrics:
+    - reward/mean
+    - reward/std
+    - accuracy/parsed
+    - invalid_rate
+    - advantages/std
+    - kl
+    - completion_length/mean
+
+checkpoint:
+  save_every_n_steps: 128
+  save_total_limit: 2
+  save_optimizer_state: false
+
+controlled_budget:
+  paper_reference: >-
+    GRPO (DeepSeekMath, arXiv:2402.03300) samples a group of G rollouts per prompt and
+    normalises the advantage within that group. We keep the estimator exactly as published
+    (TRL's scale_rewards=group) and change only the reward (verdict correctness).
+  controlled_reference: >-
+    Matched to the other three methods on rows_per_update (8 prompt-states), rollouts per
+    update (64), total rollouts (16,384) and estimated generated tokens (46,268,416).
+  paper_states_per_sample: 1
+  paper_rollouts_per_state: 64
+  paper_rollouts_per_update: 512
+  paper_training_steps: 1000
+  paper_generated_tokens: 1445888000
+  notes: >-
+    The paper's G=64 and 1,000 steps are quoted for scale, not matched: this run is a
+    controlled 4-way comparison at a fixed token budget, and with states_per_sample=1 the
+    rollout group is the plain per-prompt group. paper_generated_tokens is our estimate
+    (paper_rollouts_per_update * paper_training_steps * (1800 + 1024)), not a number the
+    paper reports.

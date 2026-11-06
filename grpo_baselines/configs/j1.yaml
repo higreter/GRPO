@@ -1,0 +1,94 @@
+# Method 2: J1 (arXiv:2505.10320) -- verdict correctness + pair-level consistency.
+#
+# Two linked prompt states per preference pair:
+#   original : A = answer1, B = answer2, ground truth = the source label
+#   swapped  : A = answer2, B = answer1, ground truth = the flipped label
+# The reward is +1 for a correct verdict and +1 more only when *both* states are correct
+# (paper Sec. 2.2).  No format bonus: the paper reports trying one and finding no gain.
+#
+# Budget arithmetic (see common/config.py -- these are checked, not decorative):
+#   rows_per_update      = 8 * 2 = 16
+#   rollouts_per_state   = 16 / 2 = 8          (TRL groups over these eight per state)
+#   rollouts_per_update  = 8 * 16 = 128
+#   training_steps       = 16384 / 128 = 128   (chosen to match vanilla's total rollouts)
+#   total_rollouts       = 128 * 128 = 16384
+#   generated tokens     = 16384 * (1800 + 1024) = 46,268,416   (identical to vanilla)
+#
+# The rollout budget is matched, not the step count: one J1 "sample" costs two states, so
+# 256 vanilla steps and 128 J1 steps generate the same number of tokens.  Claiming
+# fairness from equal steps would overstate J1's exposure by 2x.
+#
+# measured prompt lengths (real tokenizer, this template, both states, 44,380 rows):
+# min 298 / p50 1437 / p90 3300 / p95 3890 / p99 4916 / max 10623.
+
+method: j1
+output_format: j1
+base_model: /data/common_data/Qwen/Qwen2.5-3B-Instruct
+train_dataset: ../database/helpsteer3_train_clean.jsonl
+output_dir: runs/j1
+
+seed: 42
+max_prompt_length: 11264
+max_completion_length: 1024
+
+learning_rate: 1.0e-6
+lr_scheduler_type: constant
+warmup_ratio: 0.0
+
+global_batch_size: 8
+micro_batch_size: 2
+gradient_accumulation: 8
+states_per_sample: 2
+num_generations: 16
+training_steps: 128
+total_rollouts: 16384
+estimated_prompt_tokens: 1800
+estimated_generated_tokens: 46268416
+
+temperature: 1.0
+top_p: 1.0
+clip_epsilon: 0.2
+
+reference_model_policy: frozen_initial_policy
+kl_beta: 0.01
+
+logging:
+  log_every_n_steps: 10
+  save_completion_samples: true
+  metrics:
+    - reward/mean
+    - reward/std
+    - accuracy/parsed
+    - invalid_rate
+    - consistency/both_correct_rate
+    - consistency/same_response_rate
+    - paired_groups
+    - unpaired_groups
+    - advantages/std
+    - kl
+
+checkpoint:
+  save_every_n_steps: 64
+  save_total_limit: 2
+  save_optimizer_state: false
+
+controlled_budget:
+  paper_reference: >-
+    J1 trains with 5 rollouts per prompt at temperature 1.0, total batch size 512, LR 1e-6
+    and KL coefficient 0.01 for the 8B model (paper Appendix C). Its reward has two terms:
+    verdict correctness, and consistency that pays +1 only when both orderings are correct.
+  controlled_reference: >-
+    Matched to vanilla on total rollouts (16,384), rollouts per update (64 -> 128 because
+    one pair needs two states) and estimated generated tokens (46,268,416); steps are
+    halved to 128 for that reason. G=16 per pair (8 per state) instead of the paper's 5.
+  paper_states_per_sample: 2
+  paper_rollouts_per_state: 5
+  paper_rollouts_per_update: 512
+  paper_training_steps: 1000
+  paper_generated_tokens: 1445888000
+  notes: >-
+    The paper does not state a step count; paper_training_steps and paper_generated_tokens
+    are our scale estimates from total batch 512 (512 * 1000 steps * (1800 + 1024 tokens)),
+    not published numbers. Consistency is evaluated within a generation batch, so both
+    states of a pair must land in the same batch -- the sampler guarantees it and the
+    trainer raises if it ever is not true.
